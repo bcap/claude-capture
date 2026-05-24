@@ -53,11 +53,18 @@ If `mitmdump` is missing, `claude-captured` prints a warning and runs `claude` n
 
 ## Working with the captured HAR
 
-Decompress, then open in any HAR viewer (Chrome/Firefox DevTools' Network panel → "Import HAR", or any standalone tool):
+Two convenient viewers:
 
-```sh
-zstd -d .claude-traffic-*.har.zst    # or: xz -d / gunzip
-```
+- **mitmweb** (inspection only, no proxy) — requires mitmproxy ≥ 10.1. Reads the compressed file directly via stdin, no temp file needed:
+  ```sh
+  zstd -dc .claude-traffic-20260524-181250.har.zst | mitmweb -n -r -
+  # or: xz -dc / gunzip -c
+  ```
+  `-n` disables the proxy listener; `-r -` loads from stdin. Opens a browser UI for flow inspection.
+- **Chrome/Firefox DevTools** — Network panel → "Import HAR". Needs an on-disk file, so decompress first:
+  ```sh
+  zstd -d .claude-traffic-*.har.zst    # or: xz -d / gunzip
+  ```
 
 The capture contains every request/response between `claude` and the API: headers, full request/response bodies (base64-encoded as per the HAR spec), and timing.
 
