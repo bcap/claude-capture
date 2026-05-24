@@ -9,8 +9,11 @@ A tiny tooling repo that wraps the `claude` CLI with an mitmproxy-based HTTP(S) 
 ## Commands
 
 - Run claude with capture: `./claude-captured [args forwarded to claude]`
-  - Optional: `MITM_FLAGS='...'` to pass extra flags to `mitmdump` (word-split).
-  - Produces `.claude-traffic-<timestamp>.har.{zst|xz|gz}` (or uncompressed `.har` if no compressor is installed) in the current working directory.
+  - Optional env vars (all `CAPTURE_*`-prefixed):
+    - `CAPTURE_MITM_FLAGS='...'` — extra flags forwarded to `mitmdump` (word-split, no shell-quote parsing).
+    - `CAPTURE_FILE_FORMAT='...'` — full output filename, passed verbatim to `date +<format>` so strftime tokens expand. Default `.claude-traffic-%Y%m%d-%H%M%S.har`. Do not include the compression suffix; it is appended automatically.
+    - `CAPTURE_COMPRESS=0|1|true|false|yes|no|on|off` — toggle compression. Default `1` (enabled). When disabled the raw `.har` is left in place.
+  - Produces `<CAPTURE_FILE_FORMAT>[.zst|.xz|.gz]` in the current working directory.
   - Acts as a drop-in `claude` replacement: forwards args via `"$@"`, propagates claude's exit code, and `exec`s claude directly if `mitmdump` is missing.
 - Convert a saved NDJSON capture to HAR manually: `./ndjson_to_har.py INPUT.ndjson OUTPUT.har` (use `-` for stdin/stdout; `--pretty` for indented; `--no-sort` to stream without holding entries in memory).
 

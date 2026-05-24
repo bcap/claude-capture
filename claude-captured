@@ -62,10 +62,16 @@ EOF
 fi
 
 DIR="$(dirname "$0")"
-NOW="$(date +%Y%m%d-%H%M%S)"
-ENTRIES_FILE=".claude-traffic-$NOW.har-entries.jsonl"
-HAR_FILE=".claude-traffic-$NOW.har"
+HAR_FILE="$(date +"${CAPTURE_FILE_FORMAT:-.claude-traffic-%Y%m%d-%H%M%S.har}")"
+ENTRIES_FILE="$HAR_FILE-entries.jsonl"
 PORT_FILE="$(mktemp -t mitm-port.XXXXXX)"
+
+# CAPTURE_COMPRESS: 1/true/yes/on (default) compresses the HAR; 0/false/no/off skips.
+case "${CAPTURE_COMPRESS:-1}" in
+    1|true|yes|on|TRUE|YES|ON|True|Yes|On)   CAPTURE_COMPRESS=1 ;;
+    0|false|no|off|FALSE|NO|OFF|False|No|Off) CAPTURE_COMPRESS=0 ;;
+    *) echo "claude-captured: invalid CAPTURE_COMPRESS='$CAPTURE_COMPRESS' (expected 1/0/true/false/yes/no/on/off)" >&2; exit 2 ;;
+esac
 
 graceful_stop() {
     local pid=${1:-}
@@ -92,7 +98,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Extra flags for mitmdump from env (word-split; no shell-quote parsing).
-read -r -a MITM_FLAGS_ARR <<< "${MITM_FLAGS:-}"
+read -r -a MITM_FLAGS_ARR <<< "${CAPTURE_MITM_FLAGS:-}"
 
 # Start mitm proxy
 mitmdump -q -p 0 \
@@ -140,7 +146,11 @@ if [[ -s "$ENTRIES_FILE" ]]; then
     ENTRY_COUNT=$(wc -l < "$ENTRIES_FILE")
     "$DIR/ndjson_to_har.py" "$ENTRIES_FILE" "$HAR_FILE"
     rm -- "$ENTRIES_FILE"
-    OUT="$(compress_har)"
+    if [[ "$CAPTURE_COMPRESS" == 1 ]]; then
+        OUT="$(compress_har)"
+    else
+        OUT="$HAR_FILE"
+    fi
     echo "[mitm] traffic captured at $OUT ($ENTRY_COUNT entries)" >&2
 else
     rm -f -- "$ENTRIES_FILE"

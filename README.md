@@ -21,12 +21,19 @@ Output (in the current working directory):
 
 The wrapper preserves claude's exit code, so you can use it anywhere you'd use `claude` — including in scripts and pipelines.
 
-### mitmdump flags
+### Configuration
 
-You can control the flags passed to the internal `mitmdump` through the `MITM_FLAGS` env var (word-split, no shell-quote parsing):
+All env vars are prefixed `CAPTURE_*`:
+
+| Env var | Default | What it does |
+| --- | --- | --- |
+| `CAPTURE_FILE_FORMAT` | `.claude-traffic-%Y%m%d-%H%M%S.har` | Full output filename, passed verbatim to `date +<format>`. Strftime tokens expand. Don't include the compression suffix — it's appended automatically. |
+| `CAPTURE_COMPRESS` | `1` | Toggle final compression. Accepts `0/1`, `true/false`, `yes/no`, `on/off`. When disabled the raw `.har` is kept. |
+| `CAPTURE_MITM_FLAGS` | _(empty)_ | Extra flags forwarded to the internal `mitmdump` (word-split, no shell-quote parsing). |
 
 ```sh
-MITM_FLAGS='-v --set stream_large_bodies=10m' ./claude-captured
+CAPTURE_MITM_FLAGS='-v --set stream_large_bodies=10m' ./claude-captured
+CAPTURE_FILE_FORMAT='traffic-%s.har' CAPTURE_COMPRESS=0 ./claude-captured
 ```
 
 ## Requirements
