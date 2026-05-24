@@ -1,0 +1,145 @@
+#!/bin/bash
+#
+# claude.sh - run `claude` with all its HTTP(S) traffic captured to a HAR file.
+#
+# All arguments passed to this script are passed to claude
+#
+# What it does:
+#   1. Starts mitmdump in the background on a random ephemeral port (-p 0),
+#      loading two local addons:
+#        - streaming_har_ndjson.py: writes one HAR entry per line, live, as
+#          flows complete (so the capture survives an unclean exit).
+#        - port_writer.py: publishes the bound port to a temp file so this
+#          script can read it without parsing mitmdump's stdout.
+#   2. Waits for the proxy to bind, then runs `claude` with HTTPS_PROXY pointed
+#      at it and NODE_EXTRA_CA_CERTS set to the mitmproxy CA so TLS validates.
+#      Any args passed to this script are forwarded to `claude`.
+#   3. After `claude` exits, gracefully stops mitmdump (SIGTERM, then SIGKILL
+#      after 5s), assembles the NDJSON into a real HAR via ndjson_to_har.py,
+#      and compresses it with the best available compressor
+#      (zstd > xz > pigz > gzip; uncompressed if none are installed).
+#
+# Output:
+#   .claude-traffic-<timestamp>.har[.zst|.xz|.gz] in the current working dir.
+#
+# Requirements:
+#   mitmproxy (mitmdump), python3, and a trusted mitmproxy CA at
+#   ~/.mitmproxy/mitmproxy-ca-cert.pem (created on first mitmdump run).
+#
+# Usage:
+#   ./claude.sh [args passed through to claude]
+
+set -euo pipefail
+
+# If mitmdump isn't installed, warn loudly and fall through to a plain claude
+# invocation so this script remains a drop-in replacement.
+if ! command -v mitmdump >/dev/null; then
+
+    cat >&2 <<'EOF'
+==========================================================================
+  WARNING: mitmproxy not installed (mitmdump not found on PATH).
+
+  This wrapper uses mitmproxy to capture claude's traffic for post
+  analysis.
+
+  HTTP(S) traffic capture is DISABLED for this run.
+  Claude will run normally, but no HAR file will be produced.
+
+  To enable capture, install mitmproxy and re-run.
+  There are several different ways to install it. Examples:
+  - brew install mitmproxy
+  - uv tool install mitmproxy
+  - pipx install mitmproxy
+  - apt install mitmproxy
+  - pacman -S mitmproxy
+
+  More at https://www.mitmproxy.org
+==========================================================================
+
+EOF
+
+    exec claude "$@"
+fi
+
+DIR="$(dirname "$0")"
+NOW="$(date +%Y%m%d-%H%M%S)"
+ENTRIES_FILE=".claude-traffic-$NOW.har-entries.jsonl"
+HAR_FILE=".claude-traffic-$NOW.har"
+PORT_FILE="$(mktemp -t mitm-port.XXXXXX)"
+
+graceful_stop() {
+    local pid=${1:-}
+    [[ -z "$pid" ]] && return 0
+    kill -0 "$pid" 2>/dev/null || return 0
+    kill -TERM "$pid" 2>/dev/null || true
+    # Wait up to 5s for graceful shutdown.
+    for _ in $(seq 1 50); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "[mitm] pid=$pid did not exit after SIGTERM, sending SIGKILL" >&2
+        kill -KILL "$pid" 2>/dev/null || true
+    fi
+    wait "$pid" 2>/dev/null || true
+}
+
+cleanup() {
+    graceful_stop "${MITM_PID:-}"
+    MITM_PID=""
+    rm -f "$PORT_FILE"
+}
+trap cleanup EXIT
+
+# Start mitm proxy
+mitmdump -q -p 0 \
+    -s "$DIR/streaming_har_ndjson.py" --set har_ndjson="$ENTRIES_FILE" \
+    -s "$DIR/port_writer.py" --set port_file="$PORT_FILE" &
+MITM_PID=$!
+
+# Wait for the proxy to bind and publish its port (max ~10s).
+for _ in $(seq 1 100); do
+    [[ -s "$PORT_FILE" ]] && break
+    kill -0 "$MITM_PID" 2>/dev/null || { echo "mitmdump died before binding" >&2; exit 1; }
+    sleep 0.1
+done
+[[ -s "$PORT_FILE" ]] || { echo "timed out waiting for mitmdump port" >&2; exit 1; }
+PORT=$(<"$PORT_FILE")
+echo "[mitm] Running on localhost:$PORT (pid $MITM_PID); Run \`tail -n +1 -f $ENTRIES_FILE\` to inspect live traffic" >&2
+
+# Run claude hooked to use mitm proxy
+# Any extra args passed to the script are passed to claude
+# Preserve claude's exit code so this script is a drop-in replacement.
+export NODE_EXTRA_CA_CERTS=~/.mitmproxy/mitmproxy-ca-cert.pem
+export HTTPS_PROXY=http://127.0.0.1:$PORT
+export HTTP_PROXY=http://127.0.0.1:$PORT
+CLAUDE_RC=0
+claude "$@" || CLAUDE_RC=$?
+
+# Stop mitm proxy
+graceful_stop "$MITM_PID"
+MITM_PID=""
+
+# Compress the HAR with the best available compressor; fall back to plain.
+# All listed tools delete the source on success.
+compress_har() {
+    if   command -v zstd  >/dev/null; then zstd  -q -9 --rm -- "$HAR_FILE" && echo "$HAR_FILE.zst"
+    elif command -v xz    >/dev/null; then xz    -q -9      -- "$HAR_FILE" && echo "$HAR_FILE.xz"
+    elif command -v pigz  >/dev/null; then pigz  -q -9      -- "$HAR_FILE" && echo "$HAR_FILE.gz"
+    elif command -v gzip  >/dev/null; then gzip  -q -9      -- "$HAR_FILE" && echo "$HAR_FILE.gz"
+    else echo "$HAR_FILE"
+    fi
+}
+
+# Process entries and generate a final har file (skip if no entries captured)
+if [[ -s "$ENTRIES_FILE" ]]; then
+    ENTRY_COUNT=$(wc -l < "$ENTRIES_FILE")
+    "$DIR/ndjson_to_har.py" "$ENTRIES_FILE" "$HAR_FILE"
+    rm -- "$ENTRIES_FILE"
+    OUT="$(compress_har)"
+    echo "[mitm] traffic captured at $OUT ($ENTRY_COUNT entries)" >&2
+else
+    rm -f -- "$ENTRIES_FILE"
+fi
+
+exit "$CLAUDE_RC"
