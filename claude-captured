@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# claude.sh - run `claude` with all its HTTP(S) traffic captured to a HAR file.
+# claude-captured - run `claude` with all its HTTP(S) traffic captured to a HAR file.
 #
 # All arguments passed to this script are passed to claude
 #
@@ -27,7 +27,7 @@
 #   ~/.mitmproxy/mitmproxy-ca-cert.pem (created on first mitmdump run).
 #
 # Usage:
-#   ./claude.sh [args passed through to claude]
+#   ./claude-captured [args passed through to claude]
 
 set -euo pipefail
 
@@ -91,10 +91,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Extra flags for mitmdump from env (word-split; no shell-quote parsing).
+read -r -a MITM_FLAGS_ARR <<< "${MITM_FLAGS:-}"
+
 # Start mitm proxy
 mitmdump -q -p 0 \
     -s "$DIR/streaming_har_ndjson.py" --set har_ndjson="$ENTRIES_FILE" \
-    -s "$DIR/port_writer.py" --set port_file="$PORT_FILE" &
+    -s "$DIR/port_writer.py" --set port_file="$PORT_FILE" \
+    "${MITM_FLAGS_ARR[@]}" &
 MITM_PID=$!
 
 # Wait for the proxy to bind and publish its port (max ~10s).
