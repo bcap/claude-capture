@@ -15,7 +15,7 @@ A tiny tooling repo that wraps the `claude` CLI with an mitmproxy-based HTTP(S) 
     - `CAPTURE_COMPRESS=0|1|true|false|yes|no|on|off` — toggle compression. Default `1` (enabled). When disabled the raw `.har` is left in place.
   - Produces `<CAPTURE_FILE_FORMAT>[.zst|.xz|.gz]` in the current working directory.
   - Acts as a drop-in `claude` replacement: forwards args via `"$@"`, propagates claude's exit code, and `exec`s claude directly if `mitmdump` is missing.
-- Convert a saved NDJSON capture to HAR manually: `./ndjson_to_har.py INPUT.ndjson OUTPUT.har` (use `-` for stdin/stdout; `--pretty` for indented; `--no-sort` to stream without holding entries in memory).
+- Convert a saved NDJSON capture to HAR manually: `./scripts/ndjson_to_har.py INPUT.ndjson OUTPUT.har` (use `-` for stdin/stdout; `--pretty` for indented; `--no-sort` to stream without holding entries in memory).
 
 There are no tests or linters configured. Don't add a CI/test scaffold unless explicitly asked.
 
@@ -23,13 +23,13 @@ There are no tests or linters configured. Don't add a CI/test scaffold unless ex
 
 The four pieces have a strict pipeline relationship — changing one usually means touching another:
 
-1. **`claude-captured`** — orchestrator. Starts `mitmdump -p 0` (ephemeral port) loading the two addons, polls a temp port-file (≤10s) for the bound port, exports `HTTPS_PROXY` / `HTTP_PROXY` / `NODE_EXTRA_CA_CERTS=~/.mitmproxy/mitmproxy-ca-cert.pem`, runs `claude`, then shuts mitmdump down via `graceful_stop` (SIGTERM → 5s wait → SIGKILL → `wait` to reap), runs `ndjson_to_har.py`, and compresses with the first available of zstd → xz → pigz → gzip.
+1. **`claude-captured`** — orchestrator. Starts `mitmdump -p 0` (ephemeral port) loading the two addons, polls a temp port-file (≤10s) for the bound port, exports `HTTPS_PROXY` / `HTTP_PROXY` / `NODE_EXTRA_CA_CERTS=~/.mitmproxy/mitmproxy-ca-cert.pem`, runs `claude`, then shuts mitmdump down via `graceful_stop` (SIGTERM → 5s wait → SIGKILL → `wait` to reap), runs `scripts/ndjson_to_har.py`, and compresses with the first available of zstd → xz → pigz → gzip.
 
 2. **`mitm/streaming_har_ndjson.py`** — mitmproxy addon. On every `response`/`error` hook, appends one fully-formed HAR `log.entries[]` object as a single line to `--set har_ndjson=PATH`, then fsyncs. This is the durability contract: a SIGKILL mid-session loses at most the in-flight flow, never the file. Bodies are stored base64 in `response.content` (standard HAR) and, for non-trivial request bodies, in a non-standard `request.postData._encoding="base64"` marker.
 
 3. **`mitm/port_writer.py`** — mitmproxy addon. In `running()` (fires once the proxy is bound), atomically writes the listen port to `--set port_file=PATH` so the wrapper can read it without parsing mitmdump stdout.
 
-4. **`ndjson_to_har.py`** — post-processor. Wraps the NDJSON entries in a HAR envelope, sorts by `startedDateTime` (HAR SHOULD-order), and normalizes the `_encoding="base64"` `postData` markers back to plain `text` when the bytes are valid UTF-8 (otherwise keeps the marker — lossless but non-standard). Tolerates a truncated final NDJSON line so dumps from killed processes still produce valid HAR.
+4. **`scripts/ndjson_to_har.py`** — post-processor. Wraps the NDJSON entries in a HAR envelope, sorts by `startedDateTime` (HAR SHOULD-order), and normalizes the `_encoding="base64"` `postData` markers back to plain `text` when the bytes are valid UTF-8 (otherwise keeps the marker — lossless but non-standard). Tolerates a truncated final NDJSON line so dumps from killed processes still produce valid HAR.
 
 ### Invariants to preserve when editing
 

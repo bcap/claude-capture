@@ -15,7 +15,7 @@
 #      at it and NODE_EXTRA_CA_CERTS set to the mitmproxy CA so TLS validates.
 #      Any args passed to this script are forwarded to `claude`.
 #   3. After `claude` exits, gracefully stops mitmdump (SIGTERM, then SIGKILL
-#      after 5s), assembles the NDJSON into a real HAR via ndjson_to_har.py,
+#      after 5s), assembles the NDJSON into a real HAR via scripts/ndjson_to_har.py,
 #      and compresses it with the best available compressor
 #      (zstd > xz > pigz > gzip; uncompressed if none are installed).
 #
@@ -144,7 +144,7 @@ compress_har() {
 # Process entries and generate a final har file (skip if no entries captured)
 if [[ -s "$ENTRIES_FILE" ]]; then
     ENTRY_COUNT=$(wc -l < "$ENTRIES_FILE")
-    "$DIR/ndjson_to_har.py" "$ENTRIES_FILE" "$HAR_FILE"
+    "$DIR/scripts/ndjson_to_har.py" "$ENTRIES_FILE" "$HAR_FILE"
     rm -- "$ENTRIES_FILE"
     if [[ "$CAPTURE_COMPRESS" == 1 ]]; then
         OUT="$(compress_har)"

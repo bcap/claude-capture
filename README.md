@@ -53,7 +53,7 @@ If `mitmdump` is missing, `claude-captured` prints a warning and runs `claude` n
 
 ## Working with the captured HAR
 
-Decompress, then open in any HAR viewer (Chrome/Firefox DevTools' Network panel → right-click → "Import HAR", or any standalone tool):
+Decompress, then open in any HAR viewer (Chrome/Firefox DevTools' Network panel → "Import HAR", or any standalone tool):
 
 ```sh
 zstd -d .claude-traffic-*.har.zst    # or: xz -d / gunzip
@@ -61,13 +61,13 @@ zstd -d .claude-traffic-*.har.zst    # or: xz -d / gunzip
 
 The capture contains every request/response between `claude` and the API: headers, full request/response bodies (base64-encoded as per the HAR spec), and timing.
 
-### Manual NDJSON → HAR conversion
+## Manual NDJSON → HAR conversion
 
 If a run is killed before the wrapper can post-process (e.g., the host loses power), you'll be left with a `.har-entries.jsonl` file. Convert it by hand:
 
 ```sh
-./ndjson_to_har.py .claude-traffic-*.har-entries.jsonl out.har
-./ndjson_to_har.py - - --pretty < entries.jsonl > out.har   # stdin/stdout
+./scripts/ndjson_to_har.py .claude-traffic-*.har-entries.jsonl out.har
+./scripts/ndjson_to_har.py - - --pretty < entries.jsonl > out.har   # stdin/stdout
 ```
 
 The converter tolerates a truncated final line, so partial captures still produce a valid HAR.
@@ -77,7 +77,7 @@ The converter tolerates a truncated final line, so partial captures still produc
 - `claude-captured` — the wrapper you actually run
 - `mitm/streaming_har_ndjson.py` — mitmproxy addon: writes one HAR entry per line, live
 - `mitm/port_writer.py` — mitmproxy addon: publishes mitmdump's bound port
-- `ndjson_to_har.py` — assembles NDJSON entries into a HAR file
+- `scripts/ndjson_to_har.py` — assembles NDJSON entries into a HAR file
 
 ## Notes and caveats
 
