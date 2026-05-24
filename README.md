@@ -75,8 +75,8 @@ The converter tolerates a truncated final line, so partial captures still produc
 ## Files
 
 - `claude-captured` — the wrapper you actually run
-- `streaming_har_ndjson.py` — mitmproxy addon: writes one HAR entry per line, live
-- `port_writer.py` — mitmproxy addon: publishes mitmdump's bound port
+- `mitm/streaming_har_ndjson.py` — mitmproxy addon: writes one HAR entry per line, live
+- `mitm/port_writer.py` — mitmproxy addon: publishes mitmdump's bound port
 - `ndjson_to_har.py` — assembles NDJSON entries into a HAR file
 
 ## Notes and caveats

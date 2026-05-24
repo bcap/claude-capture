@@ -25,15 +25,15 @@ The four pieces have a strict pipeline relationship — changing one usually mea
 
 1. **`claude-captured`** — orchestrator. Starts `mitmdump -p 0` (ephemeral port) loading the two addons, polls a temp port-file (≤10s) for the bound port, exports `HTTPS_PROXY` / `HTTP_PROXY` / `NODE_EXTRA_CA_CERTS=~/.mitmproxy/mitmproxy-ca-cert.pem`, runs `claude`, then shuts mitmdump down via `graceful_stop` (SIGTERM → 5s wait → SIGKILL → `wait` to reap), runs `ndjson_to_har.py`, and compresses with the first available of zstd → xz → pigz → gzip.
 
-2. **`streaming_har_ndjson.py`** — mitmproxy addon. On every `response`/`error` hook, appends one fully-formed HAR `log.entries[]` object as a single line to `--set har_ndjson=PATH`, then fsyncs. This is the durability contract: a SIGKILL mid-session loses at most the in-flight flow, never the file. Bodies are stored base64 in `response.content` (standard HAR) and, for non-trivial request bodies, in a non-standard `request.postData._encoding="base64"` marker.
+2. **`mitm/streaming_har_ndjson.py`** — mitmproxy addon. On every `response`/`error` hook, appends one fully-formed HAR `log.entries[]` object as a single line to `--set har_ndjson=PATH`, then fsyncs. This is the durability contract: a SIGKILL mid-session loses at most the in-flight flow, never the file. Bodies are stored base64 in `response.content` (standard HAR) and, for non-trivial request bodies, in a non-standard `request.postData._encoding="base64"` marker.
 
-3. **`port_writer.py`** — mitmproxy addon. In `running()` (fires once the proxy is bound), atomically writes the listen port to `--set port_file=PATH` so the wrapper can read it without parsing mitmdump stdout.
+3. **`mitm/port_writer.py`** — mitmproxy addon. In `running()` (fires once the proxy is bound), atomically writes the listen port to `--set port_file=PATH` so the wrapper can read it without parsing mitmdump stdout.
 
 4. **`ndjson_to_har.py`** — post-processor. Wraps the NDJSON entries in a HAR envelope, sorts by `startedDateTime` (HAR SHOULD-order), and normalizes the `_encoding="base64"` `postData` markers back to plain `text` when the bytes are valid UTF-8 (otherwise keeps the marker — lossless but non-standard). Tolerates a truncated final NDJSON line so dumps from killed processes still produce valid HAR.
 
 ### Invariants to preserve when editing
 
-- The addons are resolved by `claude-captured` via `$DIR="$(dirname "$0")"`, so they must stay co-located with the wrapper script.
+- The addons are resolved by `claude-captured` via `$DIR/mitm/...`, where `$DIR="$(dirname "$0")"`. The `mitm/` directory must stay co-located with the wrapper script.
 - HAR `cache: {}` is intentional — mitmproxy is a pass-through MITM, not a caching proxy, so there's no cache state to report.
 - mitmproxy must trust its own CA at `~/.mitmproxy/mitmproxy-ca-cert.pem` (auto-created on first `mitmdump` run); `NODE_EXTRA_CA_CERTS` relies on this. If TLS validation breaks for `claude`, that's the first thing to check.
 - `claude-captured` is meant to be a drop-in: don't add prompts, change exit-code semantics, or reorder so post-processing depends on claude's success — the capture must be flushed and compressed even on non-zero/crash exits.
