@@ -23,8 +23,29 @@ def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(secs)) + f".{ms:03d}Z"
 
 
+# Headers stripped from serialized entries because we store the *decoded* body
+# (HAR `content.text` is spec'd as decoded). Leaving these in would make any HAR
+# loader either double-decode and fail, or report a length that no longer matches.
+_STRIP_HEADERS = frozenset({"content-encoding", "content-length"})
+
+
 def _headers(h) -> list:
-    return [{"name": k, "value": v} for k, v in h.items()]
+    return [
+        {"name": k, "value": v}
+        for k, v in h.items()
+        if k.lower() not in _STRIP_HEADERS
+    ]
+
+
+def _decoded(message) -> bytes:
+    # get_content(strict=False) decodes Content-Encoding; on decode failure it
+    # falls back to raw bytes instead of raising, which keeps partial/garbled
+    # bodies recoverable rather than dropping the entry.
+    try:
+        body = message.get_content(strict=False)
+    except (ValueError, OSError):
+        body = message.raw_content
+    return body or b""
 
 
 def _cookies_req(req) -> list:
@@ -48,12 +69,12 @@ def _cookies_resp(resp) -> list:
 
 
 def _content(message) -> dict:
-    raw = message.raw_content or b""
+    body = _decoded(message)
     mime = message.headers.get("content-type", "")
     return {
-        "size": len(raw),
+        "size": len(body),
         "mimeType": mime,
-        "text": base64.b64encode(raw).decode("ascii"),
+        "text": base64.b64encode(body).decode("ascii"),
         "encoding": "base64",
     }
 
@@ -121,9 +142,7 @@ class StreamingHARNDJSON:
                 "postData": (
                     {
                         "mimeType": req.headers.get("content-type", ""),
-                        "text": base64.b64encode(req.raw_content or b"").decode(
-                            "ascii"
-                        ),
+                        "text": base64.b64encode(_decoded(req)).decode("ascii"),
                         "_encoding": "base64",
                     }
                     if req.raw_content
