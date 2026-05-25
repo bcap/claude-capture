@@ -156,9 +156,22 @@ echo "[mitm] msg=\"proxy started\" proxy=127.0.0.1:$PORT pid=$MITM_PID webui=htt
 # Run claude hooked to use mitm proxy
 # Any extra args passed to the script are passed to claude
 # Preserve claude's exit code so this script is a drop-in replacement.
-export NODE_EXTRA_CA_CERTS=~/.mitmproxy/mitmproxy-ca-cert.pem
-export HTTPS_PROXY=http://127.0.0.1:$PORT
-export HTTP_PROXY=http://127.0.0.1:$PORT
+PROXY_ADDRESS=http://127.0.0.1:$PORT
+export HTTPS_PROXY=$PROXY_ADDRESS
+export HTTP_PROXY=$PROXY_ADDRESS
+export ALL_PROXY=$PROXY_ADDRESS
+export https_proxy=$PROXY_ADDRESS
+export http_proxy=$PROXY_ADDRESS
+export all_proxy=$PROXY_ADDRESS
+
+MITM_CA=~/.mitmproxy/mitmproxy-ca-cert.pem
+export NODE_EXTRA_CA_CERTS="$MITM_CA"
+export SSL_CERT_FILE="$MITM_CA"
+export REQUESTS_CA_BUNDLE="$MITM_CA"
+export CURL_CA_BUNDLE="$MITM_CA"
+export GIT_SSL_CAINFO="$MITM_CA"
+export AWS_CA_BUNDLE="$MITM_CA"
+
 CLAUDE_RC=0
 claude "$@" || CLAUDE_RC=$?
 
