@@ -2,6 +2,22 @@
 
 A drop-in wrapper around the `claude` CLI that records every HTTP(S) request it makes to a [HAR](https://en.wikipedia.org/wiki/HAR_(file_format)) file. Useful for debugging, auditing model traffic, replaying conversations, or inspecting tool-use payloads.
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bcap/claude-capture/main/install.sh | bash
+```
+
+Clones into `~/.local/share/claude-capture` and symlinks `claude-capture` into `~/.local/bin`. Re-run to update. To uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bcap/claude-capture/main/install.sh | bash -s -- --uninstall
+```
+
+Override defaults with env vars: `CLAUDE_CAPTURE_HOME`, `BIN_DIR`, `CLAUDE_CAPTURE_REF`.
+
+You still need `mitmproxy` on `PATH` — see [Requirements](#requirements).
+
 ## Usage
 
 Just run `claude-capture` instead of `claude`. Any args passed are forwarded to `claude`
