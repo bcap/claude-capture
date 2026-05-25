@@ -93,11 +93,14 @@ install() {
     mkdir -p "$BIN_DIR"
 
     if [ -d "$INSTALL_DIR/.git" ]; then
-        log "updating existing checkout at $INSTALL_DIR"
-        git -C "$INSTALL_DIR" fetch --quiet origin "$REF"
-        git -C "$INSTALL_DIR" checkout --quiet "$REF"
-        git -C "$INSTALL_DIR" reset --quiet --hard "origin/$REF" 2>/dev/null \
-            || git -C "$INSTALL_DIR" reset --quiet --hard "$REF"
+        log "updating existing checkout at $INSTALL_DIR (ref: $REF)"
+        # Fetch the specific ref shallowly; --force handles moved tags. We then
+        # check out FETCH_HEAD directly so this works whether $REF is a branch
+        # or tag, regardless of which ref the local checkout was originally
+        # created for or whether its local tags are stale.
+        git -C "$INSTALL_DIR" fetch --quiet --depth 1 --force origin "$REF" \
+            || die "failed to fetch ref '$REF' from $REPO"
+        git -C "$INSTALL_DIR" checkout --quiet --detach --force FETCH_HEAD
     elif [ -e "$INSTALL_DIR" ]; then
         die "$INSTALL_DIR exists and is not a git checkout — refusing to clobber"
     else
@@ -128,7 +131,7 @@ install() {
            printf '\n    export PATH="%s:$PATH"\n\n' "$BIN_DIR" >&2 ;;
     esac
 
-    log "install complete — run: claude-capture --help"
+    log "install complete, run claude-capture to use it"
 }
 
 check_deps() {
