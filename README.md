@@ -120,12 +120,24 @@ If a run is killed before the wrapper can post-process (e.g., the host loses pow
 
 The converter tolerates a truncated final line, so partial captures still produce a valid HAR.
 
+## Reconstructing the conversation
+
+`scripts/har_to_conversation.py` reads a captured HAR and emits the user ↔ assistant conversation as a markdown-ish transcript — one `# <actor> on <timestamp>` block per text / thinking / tool_use / tool_result. Handles `.har`, `.har.zst`, `.har.xz`, `.har.gz`:
+
+```sh
+./scripts/har_to_conversation.py .claude-traffic-*.har.zst             # -> stdout
+./scripts/har_to_conversation.py .claude-traffic-*.har.zst -o conv.md
+```
+
+Each `/v1/messages` POST contains the full history at that point, so when the TUI rewinds a turn and the conversation branches, the script detects the divergence, merges shared prefixes, and marks branches with `=========` ordered by time.
+
 ## Files
 
 - `claude-capture` — the wrapper you actually run
 - `mitm/streaming_har_ndjson.py` — mitmproxy addon: writes one HAR entry per line, live
 - `mitm/port_writer.py` — mitmproxy addon: publishes mitmweb's bound proxy port
 - `scripts/ndjson_to_har.py` — assembles NDJSON entries into a HAR file
+- `scripts/har_to_conversation.py` — reconstructs the user/assistant conversation (with branches) from a HAR
 
 ## Notes and caveats
 
