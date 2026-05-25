@@ -4,13 +4,13 @@ A drop-in wrapper around the `claude` CLI that records every HTTP(S) request it 
 
 ## Usage
 
-Just run `claude-captured` instead of `claude`. Any args passed are forwarded to `claude`
+Just run `claude-capture` instead of `claude`. Any args passed are forwarded to `claude`
 
 Eg:
 ```bash
-./claude-captured                      # claude's regular interactive session
-./claude-captured -p "summarize foo"   # any args are forwarded to claude
-./claude-captured --help               # claude's own --help
+./claude-capture                      # claude's regular interactive session
+./claude-capture -p "summarize foo"   # any args are forwarded to claude
+./claude-capture --help               # claude's own --help
 ```
 
 Output (in the current working directory):
@@ -67,8 +67,8 @@ All env vars are prefixed `CAPTURE_*`:
 | `CAPTURE_MITM_FLAGS` | _(empty)_ | Extra flags forwarded to the internal `mitmweb` (word-split, no shell-quote parsing). |
 
 ```sh
-CAPTURE_MITM_FLAGS='-v --set stream_large_bodies=10m' ./claude-captured
-CAPTURE_FILE_FORMAT='traffic-%s.har' CAPTURE_COMPRESS=0 ./claude-captured
+CAPTURE_MITM_FLAGS='-v --set stream_large_bodies=10m' ./claude-capture
+CAPTURE_FILE_FORMAT='traffic-%s.har' CAPTURE_COMPRESS=0 ./claude-capture
 ```
 
 ## Requirements
@@ -83,7 +83,7 @@ CAPTURE_FILE_FORMAT='traffic-%s.har' CAPTURE_COMPRESS=0 ./claude-captured
 
 Optional (auto-detected, used if present): `zstd`, `xz`, `pigz`, `gzip`. If none are installed, the HAR is left uncompressed.
 
-If `mitmweb` is missing, `claude-captured` prints a warning and runs `claude` normally without capture — it never blocks you from using `claude`.
+If `mitmweb` is missing, `claude-capture` prints a warning and runs `claude` normally without capture — it never blocks you from using `claude`.
 
 
 ## Manual NDJSON → HAR conversion
@@ -99,14 +99,14 @@ The converter tolerates a truncated final line, so partial captures still produc
 
 ## Files
 
-- `claude-captured` — the wrapper you actually run
+- `claude-capture` — the wrapper you actually run
 - `mitm/streaming_har_ndjson.py` — mitmproxy addon: writes one HAR entry per line, live
 - `mitm/port_writer.py` — mitmproxy addon: publishes mitmweb's bound proxy port
 - `scripts/ndjson_to_har.py` — assembles NDJSON entries into a HAR file
 
 ## Notes and caveats
 
-- The capture covers everything any process started inside `claude-captured` does over HTTP(S) — `claude` itself plus any child processes that inherit the proxy environment.
+- The capture covers everything any process started inside `claude-capture` does over HTTP(S) — `claude` itself plus any child processes that inherit the proxy environment.
 - Request/response bodies are stored verbatim, including auth headers. **Treat the HAR file as sensitive** — it contains your API key in the `Authorization` header on every request.
 - HAR `cache: {}` is always empty by design; mitmproxy is a pass-through MITM, not a caching proxy.
 - Tested on Linux; should work on macOS. Not tested on Windows.

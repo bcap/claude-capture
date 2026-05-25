@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# claude-captured - run `claude` with all its HTTP(S) traffic captured to a HAR file.
+# claude-capture - run `claude` with all its HTTP(S) traffic captured to a HAR file.
 #
 # All arguments passed to this script are passed to claude
 #
@@ -35,7 +35,7 @@
 #   ~/.mitmproxy/mitmproxy-ca-cert.pem (created on first mitmweb run).
 #
 # Usage:
-#   ./claude-captured [args passed through to claude]
+#   ./claude-capture [args passed through to claude]
 
 set -euo pipefail
 
@@ -93,7 +93,7 @@ WEB_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 case "${CAPTURE_COMPRESS:-1}" in
     1|true|yes|on|TRUE|YES|ON|True|Yes|On)   CAPTURE_COMPRESS=1 ;;
     0|false|no|off|FALSE|NO|OFF|False|No|Off) CAPTURE_COMPRESS=0 ;;
-    *) echo "claude-captured: invalid CAPTURE_COMPRESS='$CAPTURE_COMPRESS' (expected 1/0/true/false/yes/no/on/off)" >&2; exit 2 ;;
+    *) echo "claude-capture: invalid CAPTURE_COMPRESS='$CAPTURE_COMPRESS' (expected 1/0/true/false/yes/no/on/off)" >&2; exit 2 ;;
 esac
 
 graceful_stop() {

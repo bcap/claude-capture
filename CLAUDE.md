@@ -8,7 +8,7 @@ A tiny tooling repo that wraps the `claude` CLI with an mitmproxy-based HTTP(S) 
 
 ## Commands
 
-- Run claude with capture: `./claude-captured [args forwarded to claude]`
+- Run claude with capture: `./claude-capture [args forwarded to claude]`
   - Optional env vars (all `CAPTURE_*`-prefixed):
     - `CAPTURE_MITM_FLAGS='...'` — extra flags forwarded to `mitmweb` (word-split, no shell-quote parsing).
     - `CAPTURE_FILE_FORMAT='...'` — full output filename, passed verbatim to `date +<format>` so strftime tokens expand. Default `.claude-traffic-%Y%m%d-%H%M%S.har`. Do not include the compression suffix; it is appended automatically.
@@ -23,7 +23,7 @@ There are no tests or linters configured. Don't add a CI/test scaffold unless ex
 
 The four pieces have a strict pipeline relationship — changing one usually means touching another:
 
-1. **`claude-captured`** — orchestrator. Pre-allocates an ephemeral web-UI port via a Python socket-bind trick (mitmweb has no way to report a `--web-port 0` choice back to the wrapper), generates a random hex token and passes it via `--set web_password=$WEB_TOKEN` (so the wrapper can print the full `?token=...` URL — there is no way to read mitmweb's own randomly generated token from outside its internals), starts `mitmweb -p 0 --web-host 127.0.0.1 --web-port $WEB_PORT --no-web-open-browser` with stdout+stderr redirected to a temp log (so claude's TUI is not corrupted; log is dumped on early failure and discarded on success), loads the two addons, polls a temp port-file (≤10s) for the bound proxy port, exports `HTTPS_PROXY` / `HTTP_PROXY` / `NODE_EXTRA_CA_CERTS=~/.mitmproxy/mitmproxy-ca-cert.pem`, runs `claude`, then shuts mitmweb down via `graceful_stop` (SIGTERM → 5s wait → SIGKILL → `wait` to reap), runs `scripts/ndjson_to_har.py`, and compresses with the first available of zstd → xz → pigz → gzip.
+1. **`claude-capture`** — orchestrator. Pre-allocates an ephemeral web-UI port via a Python socket-bind trick (mitmweb has no way to report a `--web-port 0` choice back to the wrapper), generates a random hex token and passes it via `--set web_password=$WEB_TOKEN` (so the wrapper can print the full `?token=...` URL — there is no way to read mitmweb's own randomly generated token from outside its internals), starts `mitmweb -p 0 --web-host 127.0.0.1 --web-port $WEB_PORT --no-web-open-browser` with stdout+stderr redirected to a temp log (so claude's TUI is not corrupted; log is dumped on early failure and discarded on success), loads the two addons, polls a temp port-file (≤10s) for the bound proxy port, exports `HTTPS_PROXY` / `HTTP_PROXY` / `NODE_EXTRA_CA_CERTS=~/.mitmproxy/mitmproxy-ca-cert.pem`, runs `claude`, then shuts mitmweb down via `graceful_stop` (SIGTERM → 5s wait → SIGKILL → `wait` to reap), runs `scripts/ndjson_to_har.py`, and compresses with the first available of zstd → xz → pigz → gzip.
 
 2. **`mitm/streaming_har_ndjson.py`** — mitmproxy addon. On every `response`/`error` hook, appends one fully-formed HAR `log.entries[]` object as a single line to `--set har_ndjson=PATH`, then fsyncs. This is the durability contract: a SIGKILL mid-session loses at most the in-flight flow, never the file. Bodies are stored base64 in `response.content` (standard HAR) and, for non-trivial request bodies, in a non-standard `request.postData._encoding="base64"` marker.
 
@@ -33,9 +33,9 @@ The four pieces have a strict pipeline relationship — changing one usually mea
 
 ### Invariants to preserve when editing
 
-- The addons are resolved by `claude-captured` via `$DIR/mitm/...`, where `$DIR="$(dirname "$0")"`. The `mitm/` directory must stay co-located with the wrapper script.
+- The addons are resolved by `claude-capture` via `$DIR/mitm/...`, where `$DIR="$(dirname "$0")"`. The `mitm/` directory must stay co-located with the wrapper script.
 - HAR `cache: {}` is intentional — mitmproxy is a pass-through MITM, not a caching proxy, so there's no cache state to report.
 - mitmproxy must trust its own CA at `~/.mitmproxy/mitmproxy-ca-cert.pem` (auto-created on first `mitmweb` run); `NODE_EXTRA_CA_CERTS` relies on this. If TLS validation breaks for `claude`, that's the first thing to check.
 - The web UI must stay bound to `127.0.0.1` only — the token is short and meant for local convenience, not for protecting a public listener; binding elsewhere would expose live request/response traffic (including the `Authorization: Bearer` header on every claude request) to whoever guesses or sniffs the token.
 - mitmweb's stdout/stderr must stay redirected away from the inherited fds: claude's TUI takes over the terminal once it starts, and any rogue log line would corrupt the display. This also hides the harmless `"Using a plaintext password"` warning emitted on every startup.
-- `claude-captured` is meant to be a drop-in: don't add prompts, change exit-code semantics, or reorder so post-processing depends on claude's success — the capture must be flushed and compressed even on non-zero/crash exits.
+- `claude-capture` is meant to be a drop-in: don't add prompts, change exit-code semantics, or reorder so post-processing depends on claude's success — the capture must be flushed and compressed even on non-zero/crash exits.
