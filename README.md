@@ -1,4 +1,4 @@
-# claude-conversation-dump
+# claude-capture
 
 A drop-in wrapper around the `claude` CLI that records every HTTP(S) request it makes to a [HAR](https://en.wikipedia.org/wiki/HAR_(file_format)) file. Useful for debugging, auditing model traffic, replaying conversations, or inspecting tool-use payloads.
 
@@ -21,6 +21,41 @@ Output (in the current working directory):
 
 The wrapper preserves claude's exit code, so you can use it anywhere you'd use `claude` — including in scripts and pipelines.
 
+### Inspecting traffic live (during the run)
+
+On startup the wrapper prints a `[mitm]` line to stderr, before claude's TUI takes over
+
+```
+[mitm] msg="proxy started" proxy=127.0.0.1:36223 pid=1996456 webui=http://127.0.0.1:59971/?token=192ca219a1710a5468b2fcdba3929f72 har_entries=.claude-traffic-20260525-015202.har-entries.jsonl
+```
+
+There are two ways to follow the capture in real time:
+
+- **mitmweb browser UI** logged at the start (`http://127.0.0.1:<random>/?token=<random>`) — full per-flow inspection (headers, bodies, timing) in your browser as requests stream in. Bound to `127.0.0.1` only
+
+  ![mitmweb live inspection UI](docs/mitmweb-screenshot.png)
+
+- **Tail the NDJSON entries file** — `tail -n +1 -f .claude-traffic-*.har-entries.jsonl`. One HAR entry per line, fsynced as each flow completes. Good for `jq` pipelines or scrollback.
+
+Both are live and read-only. You can use either or both, in any number of terminals/browsers.
+
+### Inspecting the final HAR (after the run)
+
+Once `claude` exits, the wrapper compresses the per-line NDJSON into a single `.har[.zst|.xz|.gz]` file in the current directory (it uses whichever compression tool is available). Two convenient viewers:
+
+- **Chrome / Firefox DevTools** — Network panel → right-click → "Import HAR file". Needs an on-disk uncompressed file, so decompress first:
+  ```sh
+  zstd -d .claude-traffic-*.har.zst    # or: xz -d / gunzip
+  ```
+- **mitmweb** (inspection only, no proxy). Reads the compressed file directly from stdin, no uncompressed temp file needed. The browser UI will open automatically:
+  ```sh
+  zstd -dc .claude-traffic-20260524-181250.har.zst | mitmweb -n -r -
+  # or: xz -dc / gunzip -c
+  ```
+  `-n` disables the proxy listener; `-r -` loads from stdin.
+
+The HAR contains every request/response between `claude` and the outside world: headers, full request/response bodies (base64-encoded as per the HAR spec), and timing.
+
 ### Configuration
 
 All env vars are prefixed `CAPTURE_*`:
@@ -29,7 +64,7 @@ All env vars are prefixed `CAPTURE_*`:
 | --- | --- | --- |
 | `CAPTURE_FILE_FORMAT` | `.claude-traffic-%Y%m%d-%H%M%S.har` | Full output filename, passed verbatim to `date +<format>`. Strftime tokens expand. Don't include the compression suffix — it's appended automatically. |
 | `CAPTURE_COMPRESS` | `1` | Toggle final compression. Accepts `0/1`, `true/false`, `yes/no`, `on/off`. When disabled the raw `.har` is kept. |
-| `CAPTURE_MITM_FLAGS` | _(empty)_ | Extra flags forwarded to the internal `mitmdump` (word-split, no shell-quote parsing). |
+| `CAPTURE_MITM_FLAGS` | _(empty)_ | Extra flags forwarded to the internal `mitmweb` (word-split, no shell-quote parsing). |
 
 ```sh
 CAPTURE_MITM_FLAGS='-v --set stream_large_bodies=10m' ./claude-captured
@@ -38,7 +73,7 @@ CAPTURE_FILE_FORMAT='traffic-%s.har' CAPTURE_COMPRESS=0 ./claude-captured
 
 ## Requirements
 
-- `mitmproxy` (`mitmdump` on `PATH`). You can install it in several different ways:
+- `mitmproxy` (`mitmweb` on `PATH`). You can install it in several different ways:
   - `brew install mitmproxy`
   - `uv tool install mitmproxy`
   - `pipx install mitmproxy`
@@ -48,25 +83,8 @@ CAPTURE_FILE_FORMAT='traffic-%s.har' CAPTURE_COMPRESS=0 ./claude-captured
 
 Optional (auto-detected, used if present): `zstd`, `xz`, `pigz`, `gzip`. If none are installed, the HAR is left uncompressed.
 
-If `mitmdump` is missing, `claude-captured` prints a warning and runs `claude` normally without capture — it never blocks you from using `claude`.
+If `mitmweb` is missing, `claude-captured` prints a warning and runs `claude` normally without capture — it never blocks you from using `claude`.
 
-
-## Working with the captured HAR
-
-Two convenient viewers:
-
-- **mitmweb** (inspection only, no proxy) — requires mitmproxy ≥ 10.1. Reads the compressed file directly via stdin, no temp file needed:
-  ```sh
-  zstd -dc .claude-traffic-20260524-181250.har.zst | mitmweb -n -r -
-  # or: xz -dc / gunzip -c
-  ```
-  `-n` disables the proxy listener; `-r -` loads from stdin. Opens a browser UI for flow inspection.
-- **Chrome/Firefox DevTools** — Network panel → "Import HAR". Needs an on-disk file, so decompress first:
-  ```sh
-  zstd -d .claude-traffic-*.har.zst    # or: xz -d / gunzip
-  ```
-
-The capture contains every request/response between `claude` and the API: headers, full request/response bodies (base64-encoded as per the HAR spec), and timing.
 
 ## Manual NDJSON → HAR conversion
 
@@ -83,7 +101,7 @@ The converter tolerates a truncated final line, so partial captures still produc
 
 - `claude-captured` — the wrapper you actually run
 - `mitm/streaming_har_ndjson.py` — mitmproxy addon: writes one HAR entry per line, live
-- `mitm/port_writer.py` — mitmproxy addon: publishes mitmdump's bound port
+- `mitm/port_writer.py` — mitmproxy addon: publishes mitmweb's bound proxy port
 - `scripts/ndjson_to_har.py` — assembles NDJSON entries into a HAR file
 
 ## Notes and caveats
