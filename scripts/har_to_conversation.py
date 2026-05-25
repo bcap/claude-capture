@@ -19,6 +19,9 @@ Behavior:
     separated by `---------`. Branch points are marked with `=========`.
   - Filters out quota-probe requests (single "quota" user message with
     max_tokens<=8) so they don't appear as a spurious top-level branch.
+  - With `--tokens`, prints a second `# tokens: in=… out=… cache_read=…
+    cache_write=…` header line on the first block of each assistant turn,
+    extracted from the SSE `message_start`/`message_delta` events.
 """
 
 from __future__ import annotations
@@ -73,10 +76,15 @@ def decode_post_data(post_data: dict) -> str:
 # SSE → assistant content blocks
 # ---------------------------------------------------------------------------
 
-def parse_sse_assistant(sse_text: str) -> list[dict]:
-    """Reconstruct the assistant message content[] from an SSE stream."""
+def parse_sse_assistant(sse_text: str) -> tuple[list[dict], Optional[dict]]:
+    """Reconstruct (content[], usage) from an SSE stream.
+
+    Usage prefers `message_delta` (final, has end-of-turn output_tokens) and
+    falls back to `message_start`.
+    """
     blocks: dict[int, dict] = {}
     order: list[int] = []
+    usage: Optional[dict] = None
     for raw in sse_text.split("\n\n"):
         data_lines = [ln[6:] for ln in raw.splitlines() if ln.startswith("data: ")]
         if not data_lines:
@@ -86,7 +94,15 @@ def parse_sse_assistant(sse_text: str) -> list[dict]:
         except json.JSONDecodeError:
             continue
         et = evt.get("type")
-        if et == "content_block_start":
+        if et == "message_start":
+            u = (evt.get("message") or {}).get("usage")
+            if u and usage is None:
+                usage = dict(u)
+        elif et == "message_delta":
+            u = evt.get("usage")
+            if u:
+                usage = dict(u)
+        elif et == "content_block_start":
             idx = evt["index"]
             block = dict(evt["content_block"])
             if block.get("type") == "tool_use":
@@ -117,7 +133,7 @@ def parse_sse_assistant(sse_text: str) -> list[dict]:
                     block["input"] = json.loads(pj) if pj else {}
                 except json.JSONDecodeError:
                     block["input"] = {"_raw_partial_json": pj}
-    return [blocks[i] for i in order if i in blocks]
+    return [blocks[i] for i in order if i in blocks], usage
 
 
 # ---------------------------------------------------------------------------
@@ -125,11 +141,12 @@ def parse_sse_assistant(sse_text: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 class Node:
-    __slots__ = ("msg", "ts", "children")
+    __slots__ = ("msg", "ts", "children", "usage")
 
-    def __init__(self, msg: Optional[dict], ts: str):
+    def __init__(self, msg: Optional[dict], ts: str, usage: Optional[dict] = None):
         self.msg = msg
         self.ts = ts
+        self.usage = usage
         self.children: list[Node] = []
 
 
@@ -137,7 +154,13 @@ def msg_key(msg: dict) -> str:
     return json.dumps(msg, sort_keys=True)
 
 
-def insert_path(root: Node, messages: list[dict], assistant_content: list[dict], ts: str) -> None:
+def insert_path(
+    root: Node,
+    messages: list[dict],
+    assistant_content: list[dict],
+    ts: str,
+    usage: Optional[dict] = None,
+) -> None:
     cur = root
     for m in messages:
         k = msg_key(m)
@@ -151,8 +174,10 @@ def insert_path(root: Node, messages: list[dict], assistant_content: list[dict],
         k = msg_key(synth)
         nxt = next((c for c in cur.children if msg_key(c.msg) == k), None)
         if nxt is None:
-            nxt = Node(synth, ts)
+            nxt = Node(synth, ts, usage=usage)
             cur.children.append(nxt)
+        elif usage and nxt.usage is None:
+            nxt.usage = usage
 
 
 # ---------------------------------------------------------------------------
@@ -168,12 +193,23 @@ def fmt_ts(iso_ts: str) -> str:
         return iso_ts
 
 
-def write_entry(out: IO[str], actor: str, ts: str, body: str) -> None:
+def write_entry(out: IO[str], actor: str, ts: str, body: str, extra_header: str = "") -> None:
     out.write("---------\n\n")
-    out.write(f"# {actor} on {fmt_ts(ts)}\n\n")
+    out.write(f"# {actor} on {fmt_ts(ts)}\n")
+    if extra_header:
+        out.write(extra_header if extra_header.endswith("\n") else extra_header + "\n")
+    out.write("\n")
     if body:
         out.write(body if body.endswith("\n") else body + "\n")
     out.write("\n")
+
+
+def fmt_usage(usage: dict) -> str:
+    inp = usage.get("input_tokens", 0)
+    out = usage.get("output_tokens", 0)
+    cr = usage.get("cache_read_input_tokens", 0)
+    cw = usage.get("cache_creation_input_tokens", 0)
+    return f"# tokens: in={inp} out={out} cache_read={cr} cache_write={cw}"
 
 
 def tool_result_to_text(content) -> str:
@@ -196,52 +232,55 @@ def tool_result_to_text(content) -> str:
     return json.dumps(content)
 
 
-def emit_message(out: IO[str], msg: dict, ts: str) -> None:
+def emit_message(out: IO[str], msg: dict, ts: str, extra_header_first: str = "") -> None:
     role = msg.get("role", "?")
     content = msg.get("content", "")
+    pending = extra_header_first  # consumed by the first entry only
     if isinstance(content, str):
-        write_entry(out, role, ts, content)
+        write_entry(out, role, ts, content, extra_header=pending)
         return
     for block in content:
+        eh, pending = pending, ""
         if not isinstance(block, dict):
-            write_entry(out, role, ts, str(block))
+            write_entry(out, role, ts, str(block), extra_header=eh)
             continue
         bt = block.get("type")
         if bt == "text":
-            write_entry(out, role, ts, block.get("text", ""))
+            write_entry(out, role, ts, block.get("text", ""), extra_header=eh)
         elif bt == "thinking":
-            write_entry(out, f"{role} (thinking)", ts, block.get("thinking", ""))
+            write_entry(out, f"{role} (thinking)", ts, block.get("thinking", ""), extra_header=eh)
         elif bt == "tool_use":
             name = block.get("name", "?")
             tid = block.get("id", "")
             inp = block.get("input", {})
             body = f"id: {tid}\ninput:\n{json.dumps(inp, indent=2, ensure_ascii=False)}"
-            write_entry(out, f"{role} (tool_use: {name})", ts, body)
+            write_entry(out, f"{role} (tool_use: {name})", ts, body, extra_header=eh)
         elif bt == "tool_result":
             tid = block.get("tool_use_id", "")
             err = " error" if block.get("is_error") else ""
             body = tool_result_to_text(block.get("content", ""))
-            write_entry(out, f"{role} (tool_result{err}: {tid})", ts, body)
+            write_entry(out, f"{role} (tool_result{err}: {tid})", ts, body, extra_header=eh)
         elif bt == "image":
-            write_entry(out, role, ts, "[image]")
+            write_entry(out, role, ts, "[image]", extra_header=eh)
         else:
-            write_entry(out, f"{role} ({bt})", ts, json.dumps(block, ensure_ascii=False))
+            write_entry(out, f"{role} ({bt})", ts, json.dumps(block, ensure_ascii=False), extra_header=eh)
 
 
-def walk(out: IO[str], node: Node) -> None:
+def walk(out: IO[str], node: Node, show_tokens: bool = False) -> None:
     if node.msg is not None:
-        emit_message(out, node.msg, node.ts)
+        eh = fmt_usage(node.usage) if (show_tokens and node.usage) else ""
+        emit_message(out, node.msg, node.ts, extra_header_first=eh)
     children = node.children
     if not children:
         return
     if len(children) == 1:
-        walk(out, children[0])
+        walk(out, children[0], show_tokens)
         return
     ordered = sorted(children, key=lambda c: c.ts)
     n = len(ordered)
     for i, child in enumerate(ordered, 1):
         out.write(f"=========\n\n(branch {i} of {n}, from above)\n\n")
-        walk(out, child)
+        walk(out, child, show_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +309,11 @@ def main() -> None:
     )
     ap.add_argument("har_file", help="HAR path (.har, .har.zst, .har.xz, .har.gz, or - for stdin)")
     ap.add_argument("-o", "--output", default="-", help="Output path (default stdout)")
+    ap.add_argument(
+        "-t", "--tokens",
+        action="store_true",
+        help="Print per-turn token usage (in/out/cache_read/cache_write) under each assistant header",
+    )
     args = ap.parse_args()
 
     with open_har(args.har_file) as fp:
@@ -296,21 +340,21 @@ def main() -> None:
         if not messages:
             continue
         sse = decode_body(e.get("response", {}).get("content", {}) or {})
-        assistant_content = parse_sse_assistant(sse)
-        insert_path(root, messages, assistant_content, e["startedDateTime"])
+        assistant_content, usage = parse_sse_assistant(sse)
+        insert_path(root, messages, assistant_content, e["startedDateTime"], usage=usage)
 
     out = sys.stdout if args.output == "-" else open(args.output, "w", encoding="utf-8")
     try:
         if not root.children:
             return
         if len(root.children) == 1:
-            walk(out, root.children[0])
+            walk(out, root.children[0], args.tokens)
         else:
             ordered = sorted(root.children, key=lambda c: c.ts)
             n = len(ordered)
             for i, child in enumerate(ordered, 1):
                 out.write(f"=========\n\n(top-level branch {i} of {n})\n\n")
-                walk(out, child)
+                walk(out, child, args.tokens)
     finally:
         if out is not sys.stdout:
             out.close()
