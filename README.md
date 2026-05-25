@@ -8,13 +8,20 @@ A drop-in wrapper around the `claude` CLI that records every HTTP(S) request it 
 curl -fsSL https://raw.githubusercontent.com/bcap/claude-capture/main/install.sh | bash
 ```
 
-Clones into `~/.local/share/claude-capture` and symlinks `claude-capture` into `~/.local/bin`. Re-run to update. To uninstall:
+Clones the latest release tag into `~/.local/share/claude-capture` and symlinks `claude-capture` into `~/.local/bin`. Re-run to update. To uninstall:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bcap/claude-capture/main/install.sh | bash -s -- --uninstall
 ```
 
-Override defaults with env vars: `CLAUDE_CAPTURE_HOME`, `BIN_DIR`, `CLAUDE_CAPTURE_REF`.
+Pin to a specific ref (tag or branch) with `CLAUDE_CAPTURE_REF`:
+
+```bash
+CLAUDE_CAPTURE_REF=main   curl -fsSL .../install.sh | bash   # bleeding edge
+CLAUDE_CAPTURE_REF=v0.1   curl -fsSL .../install.sh | bash   # specific release
+```
+
+Other env-var overrides: `CLAUDE_CAPTURE_HOME`, `BIN_DIR`.
 
 You still need `mitmproxy` on `PATH` — see [Requirements](#requirements).
 

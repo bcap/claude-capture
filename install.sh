@@ -7,16 +7,32 @@
 # Env vars:
 #   CLAUDE_CAPTURE_HOME  Install dir (default: ~/.local/share/claude-capture)
 #   BIN_DIR              Symlink dir (default: ~/.local/bin)
-#   CLAUDE_CAPTURE_REF   Git ref to check out (default: main)
+#   CLAUDE_CAPTURE_REF   Git ref to check out (default: latest v* tag, or main if none)
 #   CLAUDE_CAPTURE_REPO  Git URL (default: https://github.com/bcap/claude-capture.git)
 
 set -euo pipefail
 
 INSTALL_DIR="${CLAUDE_CAPTURE_HOME:-$HOME/.local/share/claude-capture}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
-REF="${CLAUDE_CAPTURE_REF:-main}"
 REPO="${CLAUDE_CAPTURE_REPO:-https://github.com/bcap/claude-capture.git}"
+REF="${CLAUDE_CAPTURE_REF:-}"
 SYMLINK="$BIN_DIR/claude-capture"
+
+resolve_ref() {
+    # Honor explicit override.
+    if [ -n "$REF" ]; then
+        return
+    fi
+    # Pick latest v*-prefixed tag by version sort; fall back to main if none.
+    REF="$(git ls-remote --tags --refs --sort=-v:refname "$REPO" 'v*' 2>/dev/null \
+        | head -1 | sed 's@.*refs/tags/@@')"
+    if [ -z "$REF" ]; then
+        REF=main
+        log "no release tags found — using branch: main"
+    else
+        log "resolved latest release: $REF"
+    fi
+}
 
 usage() {
     cat <<EOF
@@ -28,7 +44,7 @@ Usage: install.sh [--uninstall] [--help]
 Env vars:
   CLAUDE_CAPTURE_HOME  Install dir       (default: ~/.local/share/claude-capture)
   BIN_DIR              Symlink dir       (default: ~/.local/bin)
-  CLAUDE_CAPTURE_REF   Git ref to check out (default: main)
+  CLAUDE_CAPTURE_REF   Git ref to check out (default: latest v* tag, or main if none)
   CLAUDE_CAPTURE_REPO  Git URL           (default: https://github.com/bcap/claude-capture.git)
 EOF
 }
@@ -68,6 +84,7 @@ uninstall() {
 install() {
     command -v git >/dev/null 2>&1 || die "git is required"
 
+    resolve_ref
     mkdir -p "$BIN_DIR"
 
     if [ -d "$INSTALL_DIR/.git" ]; then
