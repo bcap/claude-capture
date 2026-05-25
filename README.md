@@ -120,16 +120,10 @@ If a run is killed before the wrapper can post-process (e.g., the host loses pow
 
 The converter tolerates a truncated final line, so partial captures still produce a valid HAR.
 
-## Reconstructing the conversation
+## Additional scripts
 
-`scripts/har_to_conversation.py` reads a captured HAR and emits the user ↔ assistant conversation as a markdown-ish transcript — one `# <actor> on <timestamp>` block per text / thinking / tool_use / tool_result. Handles `.har`, `.har.zst`, `.har.xz`, `.har.gz`:
-
-```sh
-./scripts/har_to_conversation.py .claude-traffic-*.har.zst             # -> stdout
-./scripts/har_to_conversation.py .claude-traffic-*.har.zst -o conv.md
-```
-
-Each `/v1/messages` POST contains the full history at that point, so when the TUI rewinds a turn and the conversation branches, the script detects the divergence, merges shared prefixes, and marks branches with `=========` ordered by time.
+- `scripts/har_to_conversation.py` — reconstructs the user/assistant conversation from a captured HAR (handles `.har`, `.zst`, `.xz`, `.gz`). Merges shared message prefixes across `/v1/messages` POSTs so TUI rewinds show up as branches. Pass `--tokens` to annotate each assistant turn with in/out/cache token counts.
+- `scripts/har_to_wire.py` — dumps a HAR as `curl -v`-style request/response pairs (reads stdin, writes stdout). Useful for eyeballing or grepping raw traffic.
 
 ## Files
 
@@ -138,6 +132,7 @@ Each `/v1/messages` POST contains the full history at that point, so when the TU
 - `mitm/port_writer.py` — mitmproxy addon: publishes mitmweb's bound proxy port
 - `scripts/ndjson_to_har.py` — assembles NDJSON entries into a HAR file
 - `scripts/har_to_conversation.py` — reconstructs the user/assistant conversation (with branches) from a HAR
+- `scripts/har_to_wire.py` — renders a HAR as curl -v style request/response pairs
 
 ## Notes and caveats
 
