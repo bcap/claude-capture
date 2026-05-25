@@ -69,7 +69,7 @@ EOF
     exec claude "$@"
 fi
 
-DIR="$(dirname "$0")"
+APP_DIR="$(readlink -f $(dirname "$0"))"
 HAR_FILE="$(date +"${CAPTURE_FILE_FORMAT:-.claude-traffic-%Y%m%d-%H%M%S.har}")"
 ENTRIES_FILE="$HAR_FILE-entries.jsonl"
 PORT_FILE="$(mktemp -t mitm-port.XXXXXX)"
@@ -138,8 +138,8 @@ read -r -a MITM_FLAGS_ARR <<< "${CAPTURE_MITM_FLAGS:-}"
 mitmweb -q -p 0 \
     --web-host 127.0.0.1 --web-port "$WEB_PORT" --no-web-open-browser \
     --set web_password="$WEB_TOKEN" \
-    -s "$DIR/mitm/streaming_har_ndjson.py" --set har_ndjson="$ENTRIES_FILE" \
-    -s "$DIR/mitm/port_writer.py" --set port_file="$PORT_FILE" \
+    -s "$APP_DIR/mitm/streaming_har_ndjson.py" --set har_ndjson="$ENTRIES_FILE" \
+    -s "$APP_DIR/mitm/port_writer.py" --set port_file="$PORT_FILE" \
     "${MITM_FLAGS_ARR[@]}" >"$MITM_LOG" 2>&1 &
 MITM_PID=$!
 
@@ -181,7 +181,7 @@ compress_har() {
 # Process entries and generate a final har file (skip if no entries captured)
 if [[ -s "$ENTRIES_FILE" ]]; then
     ENTRY_COUNT=$(wc -l < "$ENTRIES_FILE")
-    "$DIR/scripts/ndjson_to_har.py" "$ENTRIES_FILE" "$HAR_FILE"
+    "$APP_DIR/scripts/ndjson_to_har.py" "$ENTRIES_FILE" "$HAR_FILE"
     rm -- "$ENTRIES_FILE"
     if [[ "$CAPTURE_COMPRESS" == 1 ]]; then
         OUT="$(compress_har)"
