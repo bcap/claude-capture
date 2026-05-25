@@ -69,7 +69,7 @@ EOF
     exec claude "$@"
 fi
 
-APP_DIR="$(readlink -f $(dirname "$0"))"
+APP_DIR="$(dirname "$(readlink -f "$0")")"
 HAR_FILE="$(date +"${CAPTURE_FILE_FORMAT:-.claude-traffic-%Y%m%d-%H%M%S.har}")"
 ENTRIES_FILE="$HAR_FILE-entries.jsonl"
 PORT_FILE="$(mktemp -t mitm-port.XXXXXX)"
