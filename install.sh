@@ -23,9 +23,14 @@ resolve_ref() {
     if [ -n "$REF" ]; then
         return
     fi
-    # Pick latest v*-prefixed tag by version sort; fall back to main if none.
+    # Latest vX.Y tag, numerically version-sorted. Falls back to main if none.
+    # --sort=-v:refname is git's version sort (numeric segments compared as
+    # numbers, so v10.0 > v9.0). The grep enforces strict vX.Y to skip
+    # pre-releases (vX.Y-rc1) and anything ad-hoc.
     REF="$(git ls-remote --tags --refs --sort=-v:refname "$REPO" 'v*' 2>/dev/null \
-        | head -1 | sed 's@.*refs/tags/@@')"
+        | sed 's@.*refs/tags/@@' \
+        | grep -E '^v[0-9]+\.[0-9]+$' \
+        | head -1)"
     if [ -z "$REF" ]; then
         REF=main
         log "no release tags found — using branch: main"
